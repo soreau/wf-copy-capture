@@ -1,0 +1,2 @@
+# Wayfire Copy Capture Plugin
+

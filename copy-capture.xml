@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<wayfire>
+	<plugin name="copy-capture">
+		<_short>Copy Capture</_short>
+		<_long>Wayfire Copy Cpature Plugin</_long>
+		<category>Utility</category>
+		<option name="target_fps" type="double">
+			<_short>Target FPS</_short>
+			<_long>The target FPS of the resulting toplevel capture video.</_long>
+			<default>60.0</default>
+		</option>
+	</plugin>
+</wayfire>
