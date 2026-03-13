@@ -263,8 +263,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
 
         wlr_ext_foreign_toplevel_handle_v1_state state
         {
-            view->get_title().c_str(),
-            view->get_app_id().c_str(),
+            strdup(view->get_title().c_str()),
+            strdup(view->get_app_id().c_str()),
         };
 
         toplevels[view] = wlr_ext_foreign_toplevel_handle_v1_create(
