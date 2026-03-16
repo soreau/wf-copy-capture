@@ -35,6 +35,7 @@
 extern "C"
 {
 #include <wlr/types/wlr_xdg_shell.h>
+#include "ext-image-copy-capture-v1-server-protocol.h"
 #include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/interfaces/wlr_ext_image_capture_source_v1.h>
 #include <drm_fourcc.h>
@@ -53,8 +54,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
 {
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
     std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
+    wf::wl_listener_wrapper on_new_request, on_new_session;
     wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
-    wf::wl_listener_wrapper on_new_request;
     wlr_swapchain *swapchain;
 
   public:
@@ -62,24 +63,32 @@ class copy_capture_plugin : public wf::plugin_interface_t
     wlr_ext_image_capture_source_v1_cursor cursor_source;
     wlr_ext_image_capture_source_v1 toplevel_source;
     wayfire_view selected_view = nullptr;
+    wl_resource *session_resource;
     wf::auxilliary_buffer_t dst;
     int64_t last_time;
 
     void init() override
     {
-        wf::get_core().connect(&on_view_mapped);
-        wf::get_core().connect(&on_view_unmapped);
-
         on_new_request.set_callback([=] (void *data)
         {
             handle_new_request(data);
         });
         on_new_request.connect(
             &wf::get_core().protocols.foreign_toplevel_image_capture_source->events.new_request);
+
+        on_new_session.set_callback([=] (void *data)
+        {
+            handle_new_session(data);
+        });
+        on_new_session.connect(&wf::get_core().protocols.image_copy_capture->events.new_session);
+
         for (auto& view : wf::get_core().get_all_views())
         {
             add_toplevel_view(view);
         }
+
+        wf::get_core().connect(&on_view_mapped);
+        wf::get_core().connect(&on_view_unmapped);
     }
 
     scene::damage_callback push_damage = [=] (wf::region_t region)
@@ -150,23 +159,29 @@ class copy_capture_plugin : public wf::plugin_interface_t
             return;
         }
 
-        wf::render_target_t target = wf::render_target_t(dst.get_renderbuffer());
+        if (toplevel_source.width != uint32_t(bbox.width) || toplevel_source.height != uint32_t(bbox.height))
+        {
+            toplevel_source.width  = bbox.width;
+            toplevel_source.height = bbox.height;
+            ext_image_copy_capture_session_v1_send_buffer_size(session_resource, bbox.width, bbox.height);
+            if (swapchain->slots[0].acquired)
+            {
+                wl_signal_emit_mutable(&swapchain->slots[0].buffer->events.release, NULL);
+            }
+            dst.allocate({bbox.width, bbox.height});
+            swapchain->slots[0].buffer = dst.get_buffer();
+            swapchain->width = bbox.width;
+            swapchain->height = bbox.height;
+            wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&toplevel_source, swapchain,
+                wf::get_core().renderer);
+        }
 
-        bbox.width  = toplevel_source.width;
-        bbox.height = toplevel_source.height;
+        wf::render_target_t target = wf::render_target_t(dst.get_renderbuffer());
 
         target.geometry = bbox;
         target.scale    = 1.0f;
 
         std::vector<scene::render_instance_uptr> instances;
-        render_pass_params_t params;
-        params.background_color = {0, 0, 0, 0};
-        params.damage    = bbox;
-        params.target    = target;
-        params.instances = &instances;
-        params.flags     = RPASS_CLEAR_BACKGROUND;
-        auto pass = render_pass_t{params};
-        pass.run_partial();
 
         auto views = wf::get_core().get_all_views();
         std::vector<wayfire_view> reversed_views_vector{views.rbegin(), views.rend()};
@@ -209,17 +224,33 @@ class copy_capture_plugin : public wf::plugin_interface_t
             node->gen_render_instances(instances, [] (auto) {}, view->get_output());
         }
 
-        params.flags = 0;
-        pass = render_pass_t{params};
+        render_pass_params_t params;
+        params.background_color = {0, 0, 0, 0};
+        params.damage    = bbox;
+        params.target    = target;
+        params.instances = &instances;
+        params.flags     = RPASS_CLEAR_BACKGROUND;
+        auto pass = render_pass_t{params};
         pass.run_partial();
 
         wlr_output_cursor *cursor;
         wl_list_for_each(cursor, &output->handle->cursors, link)
         {
-            wf::geometry_t geometry{int(cursor->x), int(cursor->y), int(cursor->width), int(cursor->height)};
+            if (!cursor->texture)
+            {
+                continue;
+            }
+            wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x), int(cursor->y - cursor->hotspot_y), int(cursor->width), int(cursor->height)};
             pass.add_texture(wf::texture_t{cursor->texture}, target, geometry, wf::region_t{geometry}, 1.0);
         }
         pass.submit();
+    }
+
+    void handle_new_session(void *data)
+    {
+        wlr_ext_image_copy_capture_session_v1 *session =
+            (wlr_ext_image_copy_capture_session_v1 *) data;
+        session_resource = session->resource;
     }
 
     void handle_new_request(void *data)
@@ -236,7 +267,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
 
         ext_image_capture_source_v1_init(&toplevel_source);
         ext_image_capture_source_v1_cursor_init(&cursor_source);
-        const wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
+        wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
         toplevel_source.width  = bbox.width;
         toplevel_source.height = bbox.height;
         wlr_drm_format format
@@ -308,6 +339,10 @@ class copy_capture_plugin : public wf::plugin_interface_t
         }
 
         destroy_render_instance_manager();
+        dst.free();
+        /* XXX: This crashes the compositor. Maybe we need to release
+         * the wlr_buffer first(?) */
+        //wlr_swapchain_destroy(swapchain);
         selected_view = nullptr;
     }
 
@@ -358,7 +393,7 @@ static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
 
 static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     bool schedule_frame)
-{
+{LOGI(__func__);
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
     if (!plugin)
     {
@@ -406,9 +441,11 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
                 frame->buffer->width, "x", frame->buffer->height);
         }
 
-        plugin->deactivate();
         return;
     }
+
+    ext_image_copy_capture_frame_v1_send_damage(frame->resource, 0, 0,
+        plugin->toplevel_source.width, plugin->toplevel_source.height);
 
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
