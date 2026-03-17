@@ -65,6 +65,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
     wayfire_view selected_view = nullptr;
     wl_resource *session_resource;
     wf::auxilliary_buffer_t dst;
+    bool frame_fail = false;
     int64_t last_time;
 
     void init() override
@@ -377,6 +378,7 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
     plugin->destroy_render_instance_manager();
     plugin->create_render_instance_manager();
     plugin->last_time = wf::get_current_time();
+    plugin->frame_fail = false;
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
@@ -393,7 +395,7 @@ static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
 
 static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     bool schedule_frame)
-{LOGI(__func__);
+{
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
     if (!plugin)
     {
@@ -403,12 +405,15 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     int64_t elapsed = wf::get_current_time() - plugin->last_time;
     while (elapsed < (1000 / plugin->target_fps))
     {
-        wl_display_dispatch(wf::get_core().display);
+        wl_event_loop_dispatch(wf::get_core().ev_loop, 17);
         elapsed = wf::get_current_time() - plugin->last_time;
     }
 
     plugin->last_time += elapsed;
-    plugin->view_snapshot();
+    if (!plugin->frame_fail)
+    {
+        plugin->view_snapshot();
+    }
     wf::region_t damage = wf::region_t{wf::geometry_t{0, 0,
             int(plugin->toplevel_source.width),
             int(plugin->toplevel_source.height)}};
@@ -440,7 +445,7 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
                 buffer->width, "x", buffer->height, " : ",
                 frame->buffer->width, "x", frame->buffer->height);
         }
-
+        plugin->frame_fail = true;
         return;
     }
 
@@ -450,6 +455,7 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &ts);
+    plugin->frame_fail = false;
 }
 
 struct wlr_ext_image_capture_source_v1_cursor *get_pointer_cursor(
