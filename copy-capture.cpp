@@ -340,11 +340,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         }
 
         destroy_render_instance_manager();
+        swapchain->slots[0].buffer = NULL;
+        wlr_swapchain_destroy(swapchain);
         dst.free();
-        /* XXX: This crashes the compositor. Maybe we need to release
-         * the wlr_buffer first(?) */
-        //wlr_swapchain_destroy(swapchain);
         selected_view = nullptr;
+        session_resource = nullptr;
     }
 
     void fini() override
@@ -393,6 +393,8 @@ static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
     plugin->deactivate();
 }
 
+static bool event_looping;
+
 static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     bool schedule_frame)
 {
@@ -402,11 +404,24 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
         return;
     }
 
-    int64_t elapsed = wf::get_current_time() - plugin->last_time;
-    while (elapsed < (1000 / plugin->target_fps))
+    if (event_looping)
     {
-        wl_event_loop_dispatch(wf::get_core().ev_loop, 17);
+        return;
+    }
+
+    event_looping = true;
+    int64_t elapsed = wf::get_current_time() - plugin->last_time;
+    auto ms = 1000 / plugin->target_fps;
+    while (elapsed < ms)
+    {
+        wl_event_loop_dispatch(wf::get_core().ev_loop, ms);
         elapsed = wf::get_current_time() - plugin->last_time;
+    }
+    event_looping = false;
+
+    if (!plugin->session_resource)
+    {
+        return;
     }
 
     plugin->last_time += elapsed;
