@@ -415,6 +415,7 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     while (elapsed < ms)
     {
         wl_event_loop_dispatch(wf::get_core().ev_loop, ms);
+        wl_display_flush_clients(wf::get_core().display);
         elapsed = wf::get_current_time() - plugin->last_time;
     }
     event_looping = false;
