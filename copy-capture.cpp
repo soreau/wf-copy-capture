@@ -94,6 +94,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
 
         wf::get_core().connect(&on_view_mapped);
         wf::get_core().connect(&on_view_unmapped);
+        wf::get_core().connect(&on_view_app_id_changed);
+        wf::get_core().connect(&on_view_title_changed);
     }
 
     scene::damage_callback push_damage = [=] (wf::region_t region)
@@ -345,6 +347,36 @@ class copy_capture_plugin : public wf::plugin_interface_t
         }
     };
 
+    wf::signal::connection_t<wf::view_app_id_changed_signal> on_view_app_id_changed = [=] (wf::view_app_id_changed_signal *ev)
+    {
+        auto it = toplevels.find(ev->view);
+        if (it == toplevels.end())
+        {
+            return;
+        }
+        wlr_ext_foreign_toplevel_handle_v1_state state
+        {
+            strdup(ev->view->get_title().c_str()),
+            strdup(ev->view->get_app_id().c_str()),
+        };
+        wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
+    };
+
+    wf::signal::connection_t<wf::view_title_changed_signal> on_view_title_changed = [=] (wf::view_title_changed_signal *ev)
+    {
+        auto it = toplevels.find(ev->view);
+        if (it == toplevels.end())
+        {
+            return;
+        }
+        wlr_ext_foreign_toplevel_handle_v1_state state
+        {
+            strdup(ev->view->get_title().c_str()),
+            strdup(ev->view->get_app_id().c_str()),
+        };
+        wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
+    };
+
     void deactivate()
     {
         if (!selected_view)
@@ -365,6 +397,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
         deactivate();
         on_view_mapped.disconnect();
         on_view_unmapped.disconnect();
+        on_view_app_id_changed.disconnect();
+        on_view_title_changed.disconnect();
 
         for (auto & [view, toplevel] : toplevels)
         {
