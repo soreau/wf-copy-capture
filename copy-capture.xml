@@ -4,10 +4,36 @@
 		<_short>Copy Capture</_short>
 		<_long>Wayfire Copy Cpature Plugin</_long>
 		<category>Utility</category>
-		<option name="target_fps" type="double">
-			<_short>Target FPS</_short>
-			<_long>The target FPS of the resulting toplevel capture video.</_long>
-			<default>60.0</default>
-		</option>
+		<group>
+			<_short>General</_short>
+			<option name="target_fps" type="double">
+				<_short>Target FPS</_short>
+				<_long>The target FPS of the resulting toplevel capture video.</_long>
+				<default>60.0</default>
+			</option>
+		</group>
+		<group>
+			<_short>Advanced</_short>
+			<option name="min_width" type="int">
+				<_short>Minimum Buffer Width</_short>
+				<_long>The minimum buffer width that will be sent to the consumer. Some hardware has limits for encoding dimensions.</_long>
+				<default>130</default>
+			</option>
+			<option name="max_width" type="int">
+				<_short>Maximum Buffer Width</_short>
+				<_long>The maximum buffer width that will be sent to the consumer. Some hardware has limits for encoding dimensions.</_long>
+				<default>8192</default>
+			</option>
+			<option name="min_height" type="int">
+				<_short>Minimum Buffer Height</_short>
+				<_long>The minimum buffer height that will be sent to the consumer. Some hardware has limits for encoding dimensions.</_long>
+				<default>128</default>
+			</option>
+			<option name="max_height" type="int">
+				<_short>Maximum Buffer Height</_short>
+				<_long>The maximum buffer height that will be sent to the consumer. Some hardware has limits for encoding dimensions.</_long>
+				<default>4352</default>
+			</option>
+		</group>
 	</plugin>
 </wayfire>

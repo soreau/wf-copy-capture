@@ -52,6 +52,10 @@ namespace copy_capture
 {
 class copy_capture_plugin : public wf::plugin_interface_t
 {
+    wf::option_wrapper_t<int> min_width{"copy-capture/min_width"};
+    wf::option_wrapper_t<int> max_width{"copy-capture/max_width"};
+    wf::option_wrapper_t<int> min_height{"copy-capture/min_height"};
+    wf::option_wrapper_t<int> max_height{"copy-capture/max_height"};
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
     std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
     wf::wl_listener_wrapper on_new_request, on_new_session;
@@ -159,6 +163,10 @@ class copy_capture_plugin : public wf::plugin_interface_t
         {
             return;
         }
+
+        /* Dimension Limits */
+        bbox.width = std::max(int(min_width), std::min(bbox.width, int(max_width)));
+        bbox.height = std::max(int(min_height), std::min(bbox.height, int(max_height)));
 
         if (toplevel_source.width != uint32_t(bbox.width) || toplevel_source.height != uint32_t(bbox.height))
         {
@@ -269,6 +277,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         ext_image_capture_source_v1_init(&toplevel_source);
         ext_image_capture_source_v1_cursor_init(&cursor_source);
         wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
+
+        /* Dimension Limits */
+        bbox.width = std::max(int(min_width), std::min(bbox.width, int(max_width)));
+        bbox.height = std::max(int(min_height), std::min(bbox.height, int(max_height)));
+
         toplevel_source.width  = bbox.width;
         toplevel_source.height = bbox.height;
         wlr_drm_format format
