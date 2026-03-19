@@ -167,10 +167,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         }
 
         /* Dimension Limits */
-        bbox.width = std::max(int(min_width), std::min(bbox.width, int(max_width)));
+        bbox.width  = std::max(int(min_width), std::min(bbox.width, int(max_width)));
         bbox.height = std::max(int(min_height), std::min(bbox.height, int(max_height)));
 
-        if (toplevel_source.width != uint32_t(bbox.width) || toplevel_source.height != uint32_t(bbox.height))
+        if ((toplevel_source.width != uint32_t(bbox.width)) ||
+            (toplevel_source.height != uint32_t(bbox.height)))
         {
             toplevel_source.width  = bbox.width;
             toplevel_source.height = bbox.height;
@@ -179,9 +180,10 @@ class copy_capture_plugin : public wf::plugin_interface_t
             {
                 wl_signal_emit_mutable(&swapchain->slots[0].buffer->events.release, NULL);
             }
+
             dst.allocate({bbox.width, bbox.height});
             swapchain->slots[0].buffer = dst.get_buffer();
-            swapchain->width = bbox.width;
+            swapchain->width  = bbox.width;
             swapchain->height = bbox.height;
             wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&toplevel_source, swapchain,
                 wf::get_core().renderer);
@@ -251,7 +253,9 @@ class copy_capture_plugin : public wf::plugin_interface_t
             {
                 continue;
             }
-            wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x), int(cursor->y - cursor->hotspot_y), int(cursor->width), int(cursor->height)};
+
+            wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x), int(cursor->y - cursor->hotspot_y),
+                int(cursor->width), int(cursor->height)};
             pass.add_texture(wf::texture_t{cursor->texture}, target, geometry, wf::region_t{geometry}, 1.0);
         }
         pass.submit();
@@ -260,7 +264,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
     void handle_new_session(void *data)
     {
         wlr_ext_image_copy_capture_session_v1 *session =
-            (wlr_ext_image_copy_capture_session_v1 *) data;
+            (wlr_ext_image_copy_capture_session_v1*)data;
         session_resource = session->resource;
     }
 
@@ -281,7 +285,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
 
         /* Dimension Limits */
-        bbox.width = std::max(int(min_width), std::min(bbox.width, int(max_width)));
+        bbox.width  = std::max(int(min_width), std::min(bbox.width, int(max_width)));
         bbox.height = std::max(int(min_height), std::min(bbox.height, int(max_height)));
 
         toplevel_source.width  = bbox.width;
@@ -347,13 +351,15 @@ class copy_capture_plugin : public wf::plugin_interface_t
         }
     };
 
-    wf::signal::connection_t<wf::view_app_id_changed_signal> on_view_app_id_changed = [=] (wf::view_app_id_changed_signal *ev)
+    wf::signal::connection_t<wf::view_app_id_changed_signal> on_view_app_id_changed =
+        [=] (wf::view_app_id_changed_signal *ev)
     {
         auto it = toplevels.find(ev->view);
         if (it == toplevels.end())
         {
             return;
         }
+
         wlr_ext_foreign_toplevel_handle_v1_state state
         {
             strdup(ev->view->get_title().c_str()),
@@ -362,13 +368,15 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
     };
 
-    wf::signal::connection_t<wf::view_title_changed_signal> on_view_title_changed = [=] (wf::view_title_changed_signal *ev)
+    wf::signal::connection_t<wf::view_title_changed_signal> on_view_title_changed =
+        [=] (wf::view_title_changed_signal *ev)
     {
         auto it = toplevels.find(ev->view);
         if (it == toplevels.end())
         {
             return;
         }
+
         wlr_ext_foreign_toplevel_handle_v1_state state
         {
             strdup(ev->view->get_title().c_str()),
@@ -388,7 +396,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         swapchain->slots[0].buffer = NULL;
         wlr_swapchain_destroy(swapchain);
         dst.free();
-        selected_view = nullptr;
+        selected_view    = nullptr;
         session_resource = nullptr;
     }
 
@@ -424,7 +432,7 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
 
     plugin->destroy_render_instance_manager();
     plugin->create_render_instance_manager();
-    plugin->last_time = wf::get_current_time();
+    plugin->last_time  = wf::get_current_time();
     plugin->frame_fail = false;
 }
 
@@ -465,6 +473,7 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
         wl_display_flush_clients(wf::get_core().display);
         elapsed = wf::get_current_time() - plugin->last_time;
     }
+
     event_looping = false;
 
     if (!plugin->session_resource)
@@ -477,6 +486,7 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     {
         plugin->view_snapshot();
     }
+
     wf::region_t damage = wf::region_t{wf::geometry_t{0, 0,
             int(plugin->toplevel_source.width),
             int(plugin->toplevel_source.height)}};
@@ -508,6 +518,7 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
                 buffer->width, "x", buffer->height, " : ",
                 frame->buffer->width, "x", frame->buffer->height);
         }
+
         plugin->frame_fail = true;
         return;
     }
