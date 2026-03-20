@@ -423,7 +423,7 @@ wf::copy_capture::copy_capture_plugin *plugin;
 
 static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool with_cursors)
 {
-    LOGI(__func__, ": Client started toplevel copy capture.");
+    LOGD(__func__, ": Client started toplevel copy capture.");
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
     if (!plugin)
     {
@@ -438,7 +438,7 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
 {
-    LOGI(__func__, ": Client stopped toplevel copy capture.");
+    LOGD(__func__, ": Client stopped toplevel copy capture.");
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
     if (!plugin)
     {
@@ -511,10 +511,10 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
     if (!wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, buffer,
         wf::get_core().renderer))
     {
-        LOGI("Failed to copy view buffer to client frame buffer!");
+        LOGD("Failed to copy view buffer to client frame buffer!");
         if ((buffer->width != frame->buffer->width) || (buffer->height != frame->buffer->height))
         {
-            LOGI("The src and dst sizes differ: ",
+            LOGD("The src and dst sizes differ: ",
                 buffer->width, "x", buffer->height, " : ",
                 frame->buffer->width, "x", frame->buffer->height);
         }
