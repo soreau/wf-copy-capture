@@ -60,6 +60,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
     std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
     wf::wl_listener_wrapper on_new_request, on_new_session;
     wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
+    wf::region_t buffer_damage;
     wlr_swapchain *swapchain;
 
   public:
@@ -69,6 +70,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
     wayfire_view selected_view = nullptr;
     wl_resource *session_resource;
     wf::auxilliary_buffer_t dst;
+    wf::region_t frame_damage;
     bool frame_fail = false;
     int64_t last_time;
 
@@ -99,7 +101,9 @@ class copy_capture_plugin : public wf::plugin_interface_t
     }
 
     scene::damage_callback push_damage = [=] (wf::region_t region)
-    {};
+    {
+        buffer_damage |= region;
+    };
 
     void destroy_render_instance_manager()
     {
@@ -165,6 +169,13 @@ class copy_capture_plugin : public wf::plugin_interface_t
         {
             return;
         }
+
+        frame_damage = buffer_damage + -wf::point_t{bbox.x, bbox.y};
+        auto extents = frame_damage.get_extents();
+        frame_damage &= wf::region_t{wf::geometry_t{0, 0, std::max(0, extents.x2 - extents.x1), std::max(0,
+            extents.y2 -
+            extents.y1)}};
+        buffer_damage.clear();
 
         /* Dimension Limits */
         bbox.width  = std::max(int(min_width), std::min(bbox.width, int(max_width)));
@@ -432,8 +443,10 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
 
     plugin->destroy_render_instance_manager();
     plugin->create_render_instance_manager();
-    plugin->last_time  = wf::get_current_time();
-    plugin->frame_fail = false;
+    plugin->last_time     = wf::get_current_time();
+    plugin->frame_fail    = false;
+    plugin->frame_damage |= wf::geometry_t{0, 0,
+        int(plugin->toplevel_source.width), int(plugin->toplevel_source.height)};
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
@@ -523,8 +536,13 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
         return;
     }
 
-    ext_image_copy_capture_frame_v1_send_damage(frame->resource, 0, 0,
-        plugin->toplevel_source.width, plugin->toplevel_source.height);
+    for (auto rect : plugin->frame_damage)
+    {
+        ext_image_copy_capture_frame_v1_send_damage(frame->resource,
+            rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1);
+    }
+
+    plugin->frame_damage.clear();
 
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
