@@ -64,7 +64,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
     wlr_swapchain *swapchain;
 
   public:
-    wf::option_wrapper_t<double> target_fps{"copy-capture/target_fps"};
+    wf::option_wrapper_t<double> max_fps{"copy-capture/max_fps"};
     wlr_ext_image_capture_source_v1_cursor cursor_source;
     wlr_ext_image_capture_source_v1 toplevel_source;
     wayfire_view selected_view = nullptr;
@@ -479,7 +479,7 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
 
     event_looping = true;
     int64_t elapsed = wf::get_current_time() - plugin->last_time;
-    auto ms = 1000 / plugin->target_fps;
+    auto ms = 1000 / plugin->max_fps;
     while (elapsed < ms)
     {
         wl_event_loop_dispatch(wf::get_core().ev_loop, ms);

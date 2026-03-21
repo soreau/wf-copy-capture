@@ -6,10 +6,10 @@
 		<category>Utility</category>
 		<group>
 			<_short>General</_short>
-			<option name="target_fps" type="double">
-				<_short>Target FPS</_short>
-				<_long>The target FPS of the resulting toplevel capture video.</_long>
-				<default>60.0</default>
+			<option name="max_fps" type="double">
+				<_short>Maximum FPS</_short>
+				<_long>The maximum FPS of the resulting toplevel capture video. Capture clients are expected to throttle frame requests less than or equal to this value.</_long>
+				<default>240.0</default>
 			</option>
 		</group>
 		<group>
