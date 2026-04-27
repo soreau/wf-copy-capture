@@ -267,7 +267,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
 
             wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x), int(cursor->y - cursor->hotspot_y),
                 int(cursor->width), int(cursor->height)};
-            pass.add_texture(wf::texture_t{cursor->texture}, target, geometry, wf::region_t{geometry}, 1.0);
+            pass.add_texture(wf::texture_t::from_texture(cursor->texture), target, geometry, wf::region_t{geometry}, 1.0);
         }
         pass.submit();
     }
