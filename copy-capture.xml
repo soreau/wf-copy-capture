@@ -2,7 +2,7 @@
 <wayfire>
 	<plugin name="copy-capture">
 		<_short>Copy Capture</_short>
-		<_long>Wayfire Copy Cpature Plugin</_long>
+		<_long>Wayfire Copy Capture Plugin</_long>
 		<category>Utility</category>
 		<group>
 			<_short>General</_short>
