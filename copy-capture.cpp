@@ -267,7 +267,17 @@ class copy_capture_plugin : public wf::plugin_interface_t
 
             wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x), int(cursor->y - cursor->hotspot_y),
                 int(cursor->width), int(cursor->height)};
-            pass.add_texture(wf::texture_t::from_texture(cursor->texture), target, geometry, wf::region_t{geometry}, 1.0);
+
+            wlr_render_texture_options opts{};
+            opts.texture = cursor->texture;
+            opts.alpha   = NULL;
+            opts.blend_mode  = WLR_RENDER_BLEND_MODE_PREMULTIPLIED;
+            opts.filter_mode = WLR_SCALE_FILTER_BILINEAR;
+            opts.transform   = WL_OUTPUT_TRANSFORM_NORMAL;
+            opts.clip    = NULL;
+            opts.src_box = wf::geometry_to_fbox(wf::geometry_t{0, 0, int(cursor->width), int(cursor->height)});
+            opts.dst_box = geometry;
+            wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
         }
         pass.submit();
     }
