@@ -265,7 +265,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
                 continue;
             }
 
-            wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x), int(cursor->y - cursor->hotspot_y),
+            wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x - bbox.x),
+                int(cursor->y - cursor->hotspot_y - bbox.y),
                 int(cursor->width), int(cursor->height)};
 
             wlr_render_texture_options opts{};
