@@ -275,7 +275,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
             opts.filter_mode = WLR_SCALE_FILTER_BILINEAR;
             opts.transform   = WL_OUTPUT_TRANSFORM_NORMAL;
             opts.clip    = NULL;
-            opts.src_box = wf::geometry_to_fbox(wf::geometry_t{0, 0, int(cursor->width), int(cursor->height)});
+            opts.src_box =
+                wf::geometry_to_fbox(wf::geometry_t{0, 0, int(cursor->width), int(cursor->height)});
             opts.dst_box = geometry;
             wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
         }
