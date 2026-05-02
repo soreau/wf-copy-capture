@@ -223,6 +223,12 @@ class copy_capture_plugin : public wf::plugin_interface_t
                 {
                     candidate_root_node->gen_render_instances(instances, [] (auto) {}, view->get_output());
                 }
+            } else if (wlr_xwayland_surface_try_from_wlr_surface(candidate->get_wlr_surface()))
+            {
+                if (!wf::toplevel_cast(candidate) || candidate->get_app_id() == view->get_app_id())
+                {
+                    candidate_root_node->gen_render_instances(instances, [] (auto) {}, view->get_output());
+                }
             }
         }
 
