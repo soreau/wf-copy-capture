@@ -225,7 +225,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
                 }
             } else if (wlr_xwayland_surface_try_from_wlr_surface(candidate->get_wlr_surface()))
             {
-                if (!wf::toplevel_cast(candidate) || candidate->get_app_id() == view->get_app_id())
+                if (!wf::toplevel_cast(candidate) || (candidate->get_app_id() == view->get_app_id()))
                 {
                     candidate_root_node->gen_render_instances(instances, [] (auto) {}, view->get_output());
                 }
@@ -271,9 +271,9 @@ class copy_capture_plugin : public wf::plugin_interface_t
                 continue;
             }
 
-            wf::geometry_t geometry{int(cursor->x - cursor->hotspot_x - bbox.x),
-                int(cursor->y - cursor->hotspot_y - bbox.y),
-                int(cursor->width), int(cursor->height)};
+            wf::geometry_t geometry{int((cursor->x - cursor->hotspot_x) / output->handle->scale - bbox.x),
+                int((cursor->y - cursor->hotspot_y) / output->handle->scale - bbox.y),
+                int(cursor->width / output->handle->scale), int(cursor->height / output->handle->scale)};
 
             wlr_render_texture_options opts{};
             opts.texture = cursor->texture;
@@ -283,7 +283,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
             opts.transform   = WL_OUTPUT_TRANSFORM_NORMAL;
             opts.clip    = NULL;
             opts.src_box =
-                wf::geometry_to_fbox(wf::geometry_t{0, 0, int(cursor->width), int(cursor->height)});
+                wf::geometry_to_fbox(wf::geometry_t{0, 0, geometry.width, geometry.height});
             opts.dst_box = geometry;
             wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
         }
