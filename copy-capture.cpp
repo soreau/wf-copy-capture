@@ -69,6 +69,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
     wlr_ext_image_capture_source_v1 toplevel_source;
     wayfire_view selected_view = nullptr;
     wl_resource *session_resource;
+    bool render_cursors = false;
     wf::auxilliary_buffer_t dst;
     wf::region_t frame_damage;
     bool frame_fail = false;
@@ -263,30 +264,34 @@ class copy_capture_plugin : public wf::plugin_interface_t
         auto pass = render_pass_t{params};
         pass.run_partial();
 
-        wlr_output_cursor *cursor;
-        wl_list_for_each(cursor, &output->handle->cursors, link)
+        if (render_cursors)
         {
-            if (!cursor->texture)
+            wlr_output_cursor *cursor;
+            wl_list_for_each(cursor, &output->handle->cursors, link)
             {
-                continue;
+                if (!cursor->texture)
+                {
+                    continue;
+                }
+
+                wf::geometry_t geometry{int((cursor->x - cursor->hotspot_x) / output->handle->scale - bbox.x),
+                    int((cursor->y - cursor->hotspot_y) / output->handle->scale - bbox.y),
+                    int(cursor->width / output->handle->scale), int(cursor->height / output->handle->scale)};
+
+                wlr_render_texture_options opts{};
+                opts.texture = cursor->texture;
+                opts.alpha   = NULL;
+                opts.blend_mode  = WLR_RENDER_BLEND_MODE_PREMULTIPLIED;
+                opts.filter_mode = WLR_SCALE_FILTER_BILINEAR;
+                opts.transform   = WL_OUTPUT_TRANSFORM_NORMAL;
+                opts.clip    = NULL;
+                opts.src_box =
+                    wf::geometry_to_fbox(wf::geometry_t{0, 0, geometry.width, geometry.height});
+                opts.dst_box = geometry;
+                wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
             }
-
-            wf::geometry_t geometry{int((cursor->x - cursor->hotspot_x) / output->handle->scale - bbox.x),
-                int((cursor->y - cursor->hotspot_y) / output->handle->scale - bbox.y),
-                int(cursor->width / output->handle->scale), int(cursor->height / output->handle->scale)};
-
-            wlr_render_texture_options opts{};
-            opts.texture = cursor->texture;
-            opts.alpha   = NULL;
-            opts.blend_mode  = WLR_RENDER_BLEND_MODE_PREMULTIPLIED;
-            opts.filter_mode = WLR_SCALE_FILTER_BILINEAR;
-            opts.transform   = WL_OUTPUT_TRANSFORM_NORMAL;
-            opts.clip    = NULL;
-            opts.src_box =
-                wf::geometry_to_fbox(wf::geometry_t{0, 0, geometry.width, geometry.height});
-            opts.dst_box = geometry;
-            wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
         }
+
         pass.submit();
     }
 
@@ -427,6 +432,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         dst.free();
         selected_view    = nullptr;
         session_resource = nullptr;
+        render_cursors   = false;
     }
 
     void fini() override
@@ -459,6 +465,7 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
         return;
     }
 
+    plugin->render_cursors = with_cursors;
     plugin->destroy_render_instance_manager();
     plugin->create_render_instance_manager();
     plugin->last_time     = wf::get_current_time();
