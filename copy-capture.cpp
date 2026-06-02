@@ -50,23 +50,23 @@ namespace wf
 {
 namespace copy_capture
 {
-class copy_capture_plugin : public wf::plugin_interface_t
+class copy_capture_instance
 {
     wf::option_wrapper_t<int> min_width{"copy-capture/min_width"};
     wf::option_wrapper_t<int> max_width{"copy-capture/max_width"};
     wf::option_wrapper_t<int> min_height{"copy-capture/min_height"};
     wf::option_wrapper_t<int> max_height{"copy-capture/max_height"};
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
-    std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
-    wf::wl_listener_wrapper on_new_request, on_new_session;
     wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
     wf::region_t buffer_damage;
     wlr_swapchain *swapchain;
 
   public:
     wf::option_wrapper_t<double> max_fps{"copy-capture/max_fps"};
+    std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> *toplevels;
     wlr_ext_image_capture_source_v1_cursor cursor_source;
     wlr_ext_image_capture_source_v1 toplevel_source;
+    wf::wl_listener_wrapper on_new_session, on_destroy_session;
     wayfire_view selected_view = nullptr;
     wl_resource *session_resource;
     bool render_cursors = false;
@@ -75,30 +75,23 @@ class copy_capture_plugin : public wf::plugin_interface_t
     bool frame_fail = false;
     int64_t last_time;
 
-    void init() override
+    copy_capture_instance()
     {
-        on_new_request.set_callback([=] (void *data)
-        {
-            handle_new_request(data);
-        });
-        on_new_request.connect(
-            &wf::get_core().protocols.foreign_toplevel_image_capture_source->events.new_request);
-
         on_new_session.set_callback([=] (void *data)
         {
             handle_new_session(data);
         });
         on_new_session.connect(&wf::get_core().protocols.image_copy_capture->events.new_session);
 
-        for (auto& view : wf::get_core().get_all_views())
+        on_destroy_session.set_callback([=] (void *data)
         {
-            add_toplevel_view(view);
-        }
+            deactivate();
+        });
+    }
 
-        wf::get_core().connect(&on_view_mapped);
-        wf::get_core().connect(&on_view_unmapped);
-        wf::get_core().connect(&on_view_app_id_changed);
-        wf::get_core().connect(&on_view_title_changed);
+    ~copy_capture_instance()
+    {
+        deactivate();
     }
 
     scene::damage_callback push_damage = [=] (wf::region_t region)
@@ -137,6 +130,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         instance_manager->set_visibility_region(view->get_surface_root_node()->get_bounding_box());
     }
 
+    void set_toplevels(std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> *toplevels)
+    {
+        this->toplevels = toplevels;
+    }
+
     wayfire_view get_view()
     {
         if (selected_view)
@@ -144,7 +142,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
             return selected_view;
         }
 
-        for (auto & [view, toplevel] : toplevels)
+        for (auto & [view, toplevel] : *toplevels)
         {
             if (toplevel == toplevel_handle)
             {
@@ -300,9 +298,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_image_copy_capture_session_v1 *session =
             (wlr_ext_image_copy_capture_session_v1*)data;
         session_resource = session->resource;
+
+        on_destroy_session.connect(&session->events.destroy);
     }
 
-    void handle_new_request(void *data)
+    wlr_ext_image_capture_source_v1 *handle_new_request(void *data)
     {
         wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request *request =
             (wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request*)data;
@@ -311,7 +311,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         if (!selected_view)
         {
             LOGI("Could not find selected view to satisfy copy capture request.");
-            return;
+            return nullptr;
         }
 
         ext_image_capture_source_v1_init(&toplevel_source);
@@ -337,6 +337,60 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&toplevel_source, swapchain,
             wf::get_core().renderer);
         wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request_accept(request, &toplevel_source);
+
+        return &toplevel_source;
+    }
+
+    void deactivate()
+    {
+        if (!selected_view)
+        {
+            return;
+        }
+
+        destroy_render_instance_manager();
+        swapchain->slots[0].buffer = NULL;
+        wlr_swapchain_destroy(swapchain);
+        dst.free();
+        toplevel_handle  = nullptr;
+        selected_view    = nullptr;
+        session_resource = nullptr;
+        render_cursors   = false;
+        on_new_session.disconnect();
+        on_destroy_session.disconnect();
+    }
+};
+
+class copy_capture_plugin : public wf::plugin_interface_t
+{
+    std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
+    wf::wl_listener_wrapper on_new_request;
+
+  public:
+    std::map<wlr_ext_image_capture_source_v1*, std::unique_ptr<copy_capture_instance>> sessions;
+
+    void init() override
+    {
+        on_new_request.set_callback([=] (void *data)
+        {
+            auto instance = std::make_unique<copy_capture_instance>();
+            instance->set_toplevels(&toplevels);
+            auto source = instance->handle_new_request(data);
+
+            sessions[source] = std::move(instance);
+        });
+        on_new_request.connect(
+            &wf::get_core().protocols.foreign_toplevel_image_capture_source->events.new_request);
+
+        wf::get_core().connect(&on_view_mapped);
+        wf::get_core().connect(&on_view_unmapped);
+        wf::get_core().connect(&on_view_app_id_changed);
+        wf::get_core().connect(&on_view_title_changed);
+
+        for (auto& view : wf::get_core().get_all_views())
+        {
+            add_toplevel_view(view);
+        }
     }
 
     void add_toplevel_view(wayfire_view view)
@@ -356,15 +410,25 @@ class copy_capture_plugin : public wf::plugin_interface_t
             wf::get_core().protocols.foreign_toplevel_list, &state);
     }
 
-    size_t remove_toplevel_view(wayfire_view view)
+    void remove_toplevel_view(wayfire_view view)
     {
-        if (!view || (view->role != wf::VIEW_ROLE_TOPLEVEL))
+        if (!view || (toplevels.find(view) == toplevels.end()))
         {
-            return 0;
+            return;
+        }
+
+        for (auto & [source, instance] : sessions)
+        {
+            if (instance->selected_view == view)
+            {
+                instance.reset();
+                sessions.erase(source);
+                break;
+            }
         }
 
         wlr_ext_foreign_toplevel_handle_v1_destroy(toplevels[view]);
-        return toplevels.erase(view);
+        toplevels.erase(view);
     }
 
     wf::signal::connection_t<wf::view_mapped_signal> on_view_mapped = [=] (wf::view_mapped_signal *ev)
@@ -379,10 +443,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
 
     wf::signal::connection_t<wf::view_unmapped_signal> on_view_unmapped = [=] (wf::view_unmapped_signal *ev)
     {
-        if ((remove_toplevel_view(ev->view) > 0) && (selected_view == ev->view))
-        {
-            deactivate();
-        }
+        remove_toplevel_view(ev->view);
     };
 
     wf::signal::connection_t<wf::view_app_id_changed_signal> on_view_app_id_changed =
@@ -399,6 +460,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
             strdup(ev->view->get_title().c_str()),
             strdup(ev->view->get_app_id().c_str()),
         };
+
         wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
     };
 
@@ -416,37 +478,29 @@ class copy_capture_plugin : public wf::plugin_interface_t
             strdup(ev->view->get_title().c_str()),
             strdup(ev->view->get_app_id().c_str()),
         };
+
         wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
     };
 
-    void deactivate()
-    {
-        if (!selected_view)
-        {
-            return;
-        }
-
-        destroy_render_instance_manager();
-        swapchain->slots[0].buffer = NULL;
-        wlr_swapchain_destroy(swapchain);
-        dst.free();
-        selected_view    = nullptr;
-        session_resource = nullptr;
-        render_cursors   = false;
-    }
-
     void fini() override
     {
-        deactivate();
-        on_view_mapped.disconnect();
-        on_view_unmapped.disconnect();
-        on_view_app_id_changed.disconnect();
-        on_view_title_changed.disconnect();
+        for (auto & [source, instance] : sessions)
+        {
+            instance.reset();
+            sessions.erase(source);
+        }
 
         for (auto & [view, toplevel] : toplevels)
         {
             wlr_ext_foreign_toplevel_handle_v1_destroy(toplevel);
         }
+
+        on_new_request.disconnect();
+        on_view_mapped.disconnect();
+        on_view_unmapped.disconnect();
+        on_view_app_id_changed.disconnect();
+        on_view_title_changed.disconnect();
+        sessions.clear();
 
         plugin_ptr = nullptr;
     }
@@ -465,13 +519,14 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
         return;
     }
 
-    plugin->render_cursors = with_cursors;
-    plugin->destroy_render_instance_manager();
-    plugin->create_render_instance_manager();
-    plugin->last_time     = wf::get_current_time();
-    plugin->frame_fail    = false;
-    plugin->frame_damage |= wf::geometry_t{0, 0,
-        int(plugin->toplevel_source.width), int(plugin->toplevel_source.height)};
+    plugin->sessions[source]->render_cursors = with_cursors;
+    plugin->sessions[source]->destroy_render_instance_manager();
+    plugin->sessions[source]->create_render_instance_manager();
+    plugin->sessions[source]->last_time     = wf::get_current_time();
+    plugin->sessions[source]->frame_fail    = false;
+    plugin->sessions[source]->frame_damage |= wf::geometry_t{0, 0,
+        int(plugin->sessions[source]->toplevel_source.width),
+        int(plugin->sessions[source]->toplevel_source.height)};
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
@@ -483,7 +538,8 @@ static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
         return;
     }
 
-    plugin->deactivate();
+    plugin->sessions[source].reset();
+    plugin->sessions.erase(source);
 }
 
 static bool event_looping;
@@ -492,7 +548,7 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     bool schedule_frame)
 {
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
-    if (!plugin)
+    if (!plugin || !plugin->sessions[source])
     {
         return;
     }
@@ -503,36 +559,42 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     }
 
     event_looping = true;
-    int64_t elapsed = wf::get_current_time() - plugin->last_time;
-    auto ms = 1000 / plugin->max_fps;
+    auto last_time = plugin->sessions[source]->last_time;
+    int64_t elapsed = wf::get_current_time() - last_time;
+    auto ms = 1000 / plugin->sessions[source]->max_fps;
     while (elapsed < ms)
     {
+        if (!plugin->sessions[source])
+        {
+            return;
+        }
         wl_event_loop_dispatch(wf::get_core().ev_loop, ms);
         wl_display_flush_clients(wf::get_core().display);
-        elapsed = wf::get_current_time() - plugin->last_time;
+        elapsed = wf::get_current_time() - last_time;
     }
 
     event_looping = false;
 
-    if (!plugin->session_resource)
+    if (plugin->sessions.find(source) == plugin->sessions.end() ||
+        !plugin->sessions[source]->session_resource)
     {
         return;
     }
 
-    plugin->last_time += elapsed;
-    if (!plugin->frame_fail)
+    plugin->sessions[source]->last_time += elapsed;
+    if (!plugin->sessions[source]->frame_fail)
     {
-        plugin->view_snapshot();
+        plugin->sessions[source]->view_snapshot();
     }
 
     wf::region_t damage = wf::region_t{wf::geometry_t{0, 0,
-            int(plugin->toplevel_source.width),
-            int(plugin->toplevel_source.height)}};
+            int(plugin->sessions[source]->toplevel_source.width),
+            int(plugin->sessions[source]->toplevel_source.height)}};
     wlr_ext_image_capture_source_v1_frame_event frame_event
     {
         .damage = damage.to_pixman(),
     };
-    wl_signal_emit_mutable(&plugin->toplevel_source.events.frame, &frame_event);
+    wl_signal_emit_mutable(&plugin->sessions[source]->toplevel_source.events.frame, &frame_event);
 }
 
 static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
@@ -545,7 +607,7 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
         return;
     }
 
-    auto buffer = plugin->dst.get_buffer();
+    auto buffer = plugin->sessions[source]->dst.get_buffer();
     if (!wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, buffer,
         wf::get_core().renderer))
     {
@@ -557,22 +619,22 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
                 frame->buffer->width, "x", frame->buffer->height);
         }
 
-        plugin->frame_fail = true;
+        plugin->sessions[source]->frame_fail = true;
         return;
     }
 
-    for (auto rect : plugin->frame_damage)
+    for (auto rect : plugin->sessions[source]->frame_damage)
     {
         ext_image_copy_capture_frame_v1_send_damage(frame->resource,
             rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1);
     }
 
-    plugin->frame_damage.clear();
+    plugin->sessions[source]->frame_damage.clear();
 
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &ts);
-    plugin->frame_fail = false;
+    plugin->sessions[source]->frame_fail = false;
 }
 
 struct wlr_ext_image_capture_source_v1_cursor *get_pointer_cursor(
@@ -584,7 +646,7 @@ struct wlr_ext_image_capture_source_v1_cursor *get_pointer_cursor(
         return nullptr;
     }
 
-    return &plugin->cursor_source;
+    return &plugin->sessions[source]->cursor_source;
 }
 
 static const struct wlr_ext_image_capture_source_v1_interface source_impl = {
