@@ -66,7 +66,6 @@ class copy_capture_instance
     std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> *toplevels;
     wlr_ext_image_capture_source_v1_cursor cursor_source;
     wlr_ext_image_capture_source_v1 toplevel_source;
-    wf::wl_listener_wrapper on_new_session, on_destroy_session;
     wayfire_view selected_view    = nullptr;
     wl_resource *session_resource = nullptr;
     bool render_cursors = false;
@@ -77,18 +76,7 @@ class copy_capture_instance
     int64_t last_time;
 
     copy_capture_instance()
-    {
-        on_new_session.set_callback([=] (void *data)
-        {
-            handle_new_session(data);
-        });
-        on_new_session.connect(&wf::get_core().protocols.image_copy_capture->events.new_session);
-
-        on_destroy_session.set_callback([=] (void *data)
-        {
-            deactivate();
-        });
-    }
+    {}
 
     ~copy_capture_instance()
     {
@@ -294,21 +282,6 @@ class copy_capture_instance
         pass.submit();
     }
 
-    void handle_new_session(void *data)
-    {
-        wlr_ext_image_copy_capture_session_v1 *session =
-            (wlr_ext_image_copy_capture_session_v1*)data;
-
-        if (session_resource)
-        {
-            return;
-        }
-
-        session_resource = session->resource;
-
-        on_destroy_session.connect(&session->events.destroy);
-    }
-
     wlr_ext_image_capture_source_v1 *handle_new_request(void *data)
     {
         wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request *request =
@@ -363,15 +336,13 @@ class copy_capture_instance
         selected_view    = nullptr;
         session_resource = nullptr;
         render_cursors   = false;
-        on_new_session.disconnect();
-        on_destroy_session.disconnect();
     }
 };
 
 class copy_capture_plugin : public wf::plugin_interface_t
 {
     std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
-    wf::wl_listener_wrapper on_new_request;
+    wf::wl_listener_wrapper on_new_request, on_new_session;
 
   public:
     std::map<wlr_ext_image_capture_source_v1*, std::unique_ptr<copy_capture_instance>> sessions;
@@ -389,6 +360,12 @@ class copy_capture_plugin : public wf::plugin_interface_t
         on_new_request.connect(
             &wf::get_core().protocols.foreign_toplevel_image_capture_source->events.new_request);
 
+        on_new_session.set_callback([=] (void *data)
+        {
+            handle_new_session(data);
+        });
+        on_new_session.connect(&wf::get_core().protocols.image_copy_capture->events.new_session);
+
         wf::get_core().connect(&on_view_mapped);
         wf::get_core().connect(&on_view_unmapped);
         wf::get_core().connect(&on_view_app_id_changed);
@@ -398,6 +375,14 @@ class copy_capture_plugin : public wf::plugin_interface_t
         {
             add_toplevel_view(view);
         }
+    }
+
+    void handle_new_session(void *data)
+    {
+        wlr_ext_image_copy_capture_session_v1 *session =
+            (wlr_ext_image_copy_capture_session_v1*)data;
+
+        sessions[session->source]->session_resource = session->resource;
     }
 
     void add_toplevel_view(wayfire_view view)
@@ -503,6 +488,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         }
 
         on_new_request.disconnect();
+        on_new_session.disconnect();
         on_view_mapped.disconnect();
         on_view_unmapped.disconnect();
         on_view_app_id_changed.disconnect();
