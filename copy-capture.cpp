@@ -70,6 +70,7 @@ class copy_capture_instance
     wayfire_view selected_view    = nullptr;
     wl_resource *session_resource = nullptr;
     bool render_cursors = false;
+    bool event_looping  = false;
     wf::auxilliary_buffer_t dst;
     wf::region_t frame_damage;
     bool frame_fail = false;
@@ -548,8 +549,6 @@ static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
     plugin->sessions.erase(source);
 }
 
-static bool event_looping;
-
 static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     bool schedule_frame)
 {
@@ -559,12 +558,12 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
         return;
     }
 
-    if (event_looping)
+    if (plugin->sessions[source]->event_looping)
     {
         return;
     }
 
-    event_looping = true;
+    plugin->sessions[source]->event_looping = true;
     auto last_time  = plugin->sessions[source]->last_time;
     int64_t elapsed = wf::get_current_time() - last_time;
     auto ms = 1000 / plugin->sessions[source]->max_fps;
@@ -580,7 +579,7 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
         elapsed = wf::get_current_time() - last_time;
     }
 
-    event_looping = false;
+    plugin->sessions[source]->event_looping = false;
 
     if ((plugin->sessions.find(source) == plugin->sessions.end()) ||
         !plugin->sessions[source]->session_resource)
