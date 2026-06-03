@@ -382,6 +382,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_image_copy_capture_session_v1 *session =
             (wlr_ext_image_copy_capture_session_v1*)data;
 
+        if (sessions.find(session->source) == sessions.end())
+        {
+            return;
+        }
+
         sessions[session->source]->session_resource = session->resource;
     }
 
@@ -565,13 +570,13 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
         elapsed = wf::get_current_time() - last_time;
     }
 
-    plugin->sessions[source]->event_looping = false;
-
     if ((plugin->sessions.find(source) == plugin->sessions.end()) ||
         !plugin->sessions[source]->session_resource)
     {
         return;
     }
+
+    plugin->sessions[source]->event_looping = false;
 
     plugin->sessions[source]->last_time += elapsed;
     if (!plugin->sessions[source]->frame_fail)
