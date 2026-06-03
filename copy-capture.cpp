@@ -68,7 +68,7 @@ class copy_capture_instance
     wlr_ext_image_capture_source_v1 toplevel_source;
     wf::wl_listener_wrapper on_new_session, on_destroy_session;
     wayfire_view selected_view = nullptr;
-    wl_resource *session_resource;
+    wl_resource *session_resource = nullptr;
     bool render_cursors = false;
     wf::auxilliary_buffer_t dst;
     wf::region_t frame_damage;
@@ -297,6 +297,12 @@ class copy_capture_instance
     {
         wlr_ext_image_copy_capture_session_v1 *session =
             (wlr_ext_image_copy_capture_session_v1*)data;
+
+        if (session_resource)
+        {
+            return;
+        }
+
         session_resource = session->resource;
 
         on_destroy_session.connect(&session->events.destroy);
@@ -612,12 +618,6 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
         wf::get_core().renderer))
     {
         LOGD("Failed to copy view buffer to client frame buffer!");
-        if ((buffer->width != frame->buffer->width) || (buffer->height != frame->buffer->height))
-        {
-            LOGD("The src and dst sizes differ: ",
-                buffer->width, "x", buffer->height, " : ",
-                frame->buffer->width, "x", frame->buffer->height);
-        }
 
         plugin->sessions[source]->frame_fail = true;
         return;
