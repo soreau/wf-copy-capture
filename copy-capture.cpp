@@ -150,6 +150,11 @@ class copy_capture_instance
             return;
         }
 
+        if (!view->is_mapped() || !view->get_root_node() || !view->get_surface_root_node())
+        {
+            return;
+        }
+
         auto root_node = view->get_surface_root_node();
         auto bbox   = view->get_root_node()->get_children_bounding_box();
         auto output = view->get_output();
@@ -577,8 +582,8 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     }
 
     plugin->sessions[source]->event_looping = false;
+    plugin->sessions[source]->last_time     = wf::get_current_time();
 
-    plugin->sessions[source]->last_time += elapsed;
     if (!plugin->sessions[source]->frame_fail)
     {
         plugin->sessions[source]->view_snapshot();
