@@ -395,6 +395,11 @@ class copy_capture_plugin : public wf::plugin_interface_t
         sessions[session->source]->session_resource = session->resource;
     }
 
+    std::string get_app_id(wayfire_view view)
+    {
+        return view->get_app_id() + " wf-ipc-" + std::to_string(view->get_id());
+    }
+
     void add_toplevel_view(wayfire_view view)
     {
         if (!view || (view->role != wf::VIEW_ROLE_TOPLEVEL))
@@ -405,7 +410,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_foreign_toplevel_handle_v1_state state
         {
             strdup(view->get_title().c_str()),
-            strdup(view->get_app_id().c_str()),
+            strdup(get_app_id(view).c_str()),
         };
 
         toplevels[view] = wlr_ext_foreign_toplevel_handle_v1_create(
@@ -460,7 +465,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_foreign_toplevel_handle_v1_state state
         {
             strdup(ev->view->get_title().c_str()),
-            strdup(ev->view->get_app_id().c_str()),
+            strdup(get_app_id(ev->view).c_str()),
         };
 
         wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
@@ -478,7 +483,7 @@ class copy_capture_plugin : public wf::plugin_interface_t
         wlr_ext_foreign_toplevel_handle_v1_state state
         {
             strdup(ev->view->get_title().c_str()),
-            strdup(ev->view->get_app_id().c_str()),
+            strdup(get_app_id(ev->view).c_str()),
         };
 
         wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
