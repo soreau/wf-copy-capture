@@ -36,8 +36,9 @@ extern "C"
 {
 #include <wlr/types/wlr_xdg_shell.h>
 #include "ext-image-copy-capture-v1-server-protocol.h"
-#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/interfaces/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <drm_fourcc.h>
 }
 
@@ -63,7 +64,6 @@ class copy_capture_instance
 
   public:
     wf::option_wrapper_t<double> max_fps{"copy-capture/max_fps"};
-    std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> *toplevels;
     wlr_ext_image_capture_source_v1_cursor cursor_source;
     wlr_ext_image_capture_source_v1 toplevel_source;
     wayfire_view selected_view    = nullptr;
@@ -106,7 +106,7 @@ class copy_capture_instance
             return;
         }
 
-        wayfire_view view = get_view();
+        wayfire_view view = selected_view;
         if (!view)
         {
             return;
@@ -119,32 +119,9 @@ class copy_capture_instance
         instance_manager->set_visibility_region(view->get_surface_root_node()->get_bounding_box());
     }
 
-    void set_toplevels(std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> *toplevels)
-    {
-        this->toplevels = toplevels;
-    }
-
-    wayfire_view get_view()
-    {
-        if (selected_view)
-        {
-            return selected_view;
-        }
-
-        for (auto & [view, toplevel] : *toplevels)
-        {
-            if (toplevel == toplevel_handle)
-            {
-                return view;
-            }
-        }
-
-        return nullptr;
-    }
-
     void view_snapshot()
     {
-        wayfire_view view = get_view();
+        wayfire_view view = selected_view;
         if (!view)
         {
             return;
@@ -292,7 +269,7 @@ class copy_capture_instance
         wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request *request =
             (wlr_ext_foreign_toplevel_image_capture_source_manager_v1_request*)data;
         toplevel_handle = request->toplevel_handle;
-        selected_view   = get_view();
+        selected_view.reset((wf::view_interface_t*)request->toplevel_handle->data);
         if (!selected_view)
         {
             LOGI("Could not find selected view to satisfy copy capture request.");
@@ -346,40 +323,34 @@ class copy_capture_instance
 
 class copy_capture_plugin : public wf::plugin_interface_t
 {
-    std::map<wayfire_view, wlr_ext_foreign_toplevel_handle_v1*> toplevels;
     wf::wl_listener_wrapper on_new_request, on_new_session;
+    wlr_ext_image_copy_capture_manager_v1 *image_copy_capture;
+    wlr_ext_foreign_toplevel_image_capture_source_manager_v1 *foreign_toplevel_image_capture_source;
 
   public:
     std::map<wlr_ext_image_capture_source_v1*, std::unique_ptr<copy_capture_instance>> sessions;
 
     void init() override
     {
+        image_copy_capture = wlr_ext_image_copy_capture_manager_v1_create(wf::get_core().display, 1);
+        foreign_toplevel_image_capture_source =
+            wlr_ext_foreign_toplevel_image_capture_source_manager_v1_create(wf::get_core().display, 1);
+
         on_new_request.set_callback([=] (void *data)
         {
             auto instance = std::make_unique<copy_capture_instance>();
-            instance->set_toplevels(&toplevels);
-            auto source = instance->handle_new_request(data);
+            auto source   = instance->handle_new_request(data);
 
             sessions[source] = std::move(instance);
         });
         on_new_request.connect(
-            &wf::get_core().protocols.foreign_toplevel_image_capture_source->events.new_request);
+            &foreign_toplevel_image_capture_source->events.new_request);
 
         on_new_session.set_callback([=] (void *data)
         {
             handle_new_session(data);
         });
-        on_new_session.connect(&wf::get_core().protocols.image_copy_capture->events.new_session);
-
-        wf::get_core().connect(&on_view_mapped);
-        wf::get_core().connect(&on_view_unmapped);
-        wf::get_core().connect(&on_view_app_id_changed);
-        wf::get_core().connect(&on_view_title_changed);
-
-        for (auto& view : wf::get_core().get_all_views())
-        {
-            add_toplevel_view(view);
-        }
+        on_new_session.connect(&image_copy_capture->events.new_session);
     }
 
     void handle_new_session(void *data)
@@ -395,99 +366,10 @@ class copy_capture_plugin : public wf::plugin_interface_t
         sessions[session->source]->session_resource = session->resource;
     }
 
-    std::string get_app_id(wayfire_view view)
+    bool is_unloadable() override
     {
-        return view->get_app_id() + " wf-ipc-" + std::to_string(view->get_id());
+        return false;
     }
-
-    void add_toplevel_view(wayfire_view view)
-    {
-        if (!view || (view->role != wf::VIEW_ROLE_TOPLEVEL))
-        {
-            return;
-        }
-
-        wlr_ext_foreign_toplevel_handle_v1_state state
-        {
-            strdup(view->get_title().c_str()),
-            strdup(get_app_id(view).c_str()),
-        };
-
-        toplevels[view] = wlr_ext_foreign_toplevel_handle_v1_create(
-            wf::get_core().protocols.foreign_toplevel_list, &state);
-    }
-
-    void remove_toplevel_view(wayfire_view view)
-    {
-        if (!view || (toplevels.find(view) == toplevels.end()))
-        {
-            return;
-        }
-
-        for (auto & [source, instance] : sessions)
-        {
-            if (instance->selected_view == view)
-            {
-                instance.reset();
-                sessions.erase(source);
-                break;
-            }
-        }
-
-        wlr_ext_foreign_toplevel_handle_v1_destroy(toplevels[view]);
-        toplevels.erase(view);
-    }
-
-    wf::signal::connection_t<wf::view_mapped_signal> on_view_mapped = [=] (wf::view_mapped_signal *ev)
-    {
-        if (!ev->view)
-        {
-            return;
-        }
-
-        add_toplevel_view(ev->view);
-    };
-
-    wf::signal::connection_t<wf::view_unmapped_signal> on_view_unmapped = [=] (wf::view_unmapped_signal *ev)
-    {
-        remove_toplevel_view(ev->view);
-    };
-
-    wf::signal::connection_t<wf::view_app_id_changed_signal> on_view_app_id_changed =
-        [=] (wf::view_app_id_changed_signal *ev)
-    {
-        auto it = toplevels.find(ev->view);
-        if (it == toplevels.end())
-        {
-            return;
-        }
-
-        wlr_ext_foreign_toplevel_handle_v1_state state
-        {
-            strdup(ev->view->get_title().c_str()),
-            strdup(get_app_id(ev->view).c_str()),
-        };
-
-        wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
-    };
-
-    wf::signal::connection_t<wf::view_title_changed_signal> on_view_title_changed =
-        [=] (wf::view_title_changed_signal *ev)
-    {
-        auto it = toplevels.find(ev->view);
-        if (it == toplevels.end())
-        {
-            return;
-        }
-
-        wlr_ext_foreign_toplevel_handle_v1_state state
-        {
-            strdup(ev->view->get_title().c_str()),
-            strdup(get_app_id(ev->view).c_str()),
-        };
-
-        wlr_ext_foreign_toplevel_handle_v1_update_state(toplevels[ev->view], &state);
-    };
 
     void fini() override
     {
@@ -497,17 +379,8 @@ class copy_capture_plugin : public wf::plugin_interface_t
             sessions.erase(source);
         }
 
-        for (auto & [view, toplevel] : toplevels)
-        {
-            wlr_ext_foreign_toplevel_handle_v1_destroy(toplevel);
-        }
-
         on_new_request.disconnect();
         on_new_session.disconnect();
-        on_view_mapped.disconnect();
-        on_view_unmapped.disconnect();
-        on_view_app_id_changed.disconnect();
-        on_view_title_changed.disconnect();
         sessions.clear();
 
         plugin_ptr = nullptr;
