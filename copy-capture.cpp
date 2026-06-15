@@ -57,6 +57,7 @@ class copy_capture_instance
     wf::option_wrapper_t<int> max_width{"copy-capture/max_width"};
     wf::option_wrapper_t<int> min_height{"copy-capture/min_height"};
     wf::option_wrapper_t<int> max_height{"copy-capture/max_height"};
+    wf::option_wrapper_t<bool> enable_cursor_capture{"copy-capture/enable_cursor_capture"};
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
     wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
     wf::region_t buffer_damage;
@@ -232,7 +233,7 @@ class copy_capture_instance
         auto pass = render_pass_t{params};
         pass.run_partial();
 
-        if (render_cursors)
+        if (enable_cursor_capture && render_cursors)
         {
             wlr_output_cursor *cursor;
             wl_list_for_each(cursor, &output->handle->cursors, link)
