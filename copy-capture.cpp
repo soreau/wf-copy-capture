@@ -64,7 +64,6 @@ class copy_capture_instance
 
   public:
     wf::option_wrapper_t<double> max_fps{"copy-capture/max_fps"};
-    wlr_ext_image_capture_source_v1_cursor cursor_source;
     wlr_ext_image_capture_source_v1 toplevel_source;
     wayfire_view selected_view    = nullptr;
     wl_resource *session_resource = nullptr;
@@ -277,7 +276,7 @@ class copy_capture_instance
         }
 
         ext_image_capture_source_v1_init(&toplevel_source);
-        ext_image_capture_source_v1_cursor_init(&cursor_source);
+
         wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
 
         /* Dimension Limits */
@@ -511,34 +510,16 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
     plugin->sessions[source]->frame_fail = false;
 }
 
-struct wlr_ext_image_capture_source_v1_cursor *get_pointer_cursor(
-    struct wlr_ext_image_capture_source_v1 *source, struct wlr_seat *seat)
-{
-    plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
-    if (!plugin)
-    {
-        return nullptr;
-    }
-
-    return &plugin->sessions[source]->cursor_source;
-}
-
 static const struct wlr_ext_image_capture_source_v1_interface source_impl = {
     .start = source_start,
     .stop  = source_stop,
     .request_frame = source_request_frame,
     .copy_frame    = source_copy_frame,
-    .get_pointer_cursor = get_pointer_cursor,
 };
 
 void ext_image_capture_source_v1_init(wlr_ext_image_capture_source_v1 *source)
 {
     wlr_ext_image_capture_source_v1_init(source, &source_impl);
-}
-
-void ext_image_capture_source_v1_cursor_init(wlr_ext_image_capture_source_v1_cursor *source)
-{
-    wlr_ext_image_capture_source_v1_cursor_init(source, &source_impl);
 }
 
 /* XXX: Hack: We need a copy of the class instance, so instead of using
