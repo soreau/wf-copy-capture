@@ -45,7 +45,6 @@ extern "C"
 void *plugin_ptr;
 
 void ext_image_capture_source_v1_init(wlr_ext_image_capture_source_v1 *source);
-void ext_image_capture_source_v1_cursor_init(wlr_ext_image_capture_source_v1_cursor *source);
 
 namespace wf
 {
@@ -238,7 +237,7 @@ class copy_capture_instance
             wlr_output_cursor *cursor;
             wl_list_for_each(cursor, &output->handle->cursors, link)
             {
-                if (!cursor->texture)
+                if (!cursor->enabled || !cursor->visible || !cursor->texture)
                 {
                     continue;
                 }
@@ -248,15 +247,10 @@ class copy_capture_instance
                     int(cursor->width / output->handle->scale), int(cursor->height / output->handle->scale)};
 
                 wlr_render_texture_options opts{};
-                opts.texture = cursor->texture;
-                opts.alpha   = NULL;
-                opts.blend_mode  = WLR_RENDER_BLEND_MODE_PREMULTIPLIED;
-                opts.filter_mode = WLR_SCALE_FILTER_BILINEAR;
-                opts.transform   = WL_OUTPUT_TRANSFORM_NORMAL;
-                opts.clip    = NULL;
-                opts.src_box =
-                    wf::geometry_to_fbox(wf::geometry_t{0, 0, geometry.width, geometry.height});
-                opts.dst_box = geometry;
+                opts.texture   = cursor->texture;
+                opts.transform = output->handle->transform;
+                opts.src_box   = cursor->src_box;
+                opts.dst_box   = geometry;
                 wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
             }
         }
