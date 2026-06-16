@@ -34,6 +34,11 @@
 				<_long>The maximum buffer height that will be sent to the consumer. Some hardware has limits for encoding dimensions.</_long>
 				<default>4352</default>
 			</option>
+			<option name="enable_cursor_capture" type="bool">
+				<_short>Enable cursor capture</_short>
+				<_long>Whether to include cursors in the capture output.</_long>
+				<default>true</default>
+			</option>
 		</group>
 	</plugin>
 </wayfire>
