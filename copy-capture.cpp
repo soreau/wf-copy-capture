@@ -59,7 +59,7 @@ class copy_capture_instance
     wf::option_wrapper_t<bool> enable_cursor_capture{"copy-capture/enable_cursor_capture"};
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
     wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
-    wf::region_t buffer_damage;
+    wf::regionf_t buffer_damage;
     wlr_swapchain *swapchain;
 
   public:
@@ -70,7 +70,7 @@ class copy_capture_instance
     bool render_cursors = false;
     bool event_looping  = false;
     wf::auxilliary_buffer_t dst;
-    wf::region_t frame_damage;
+    wf::regionf_t frame_damage;
     bool frame_fail = false;
     int64_t last_time;
 
@@ -82,7 +82,7 @@ class copy_capture_instance
         deactivate();
     }
 
-    scene::damage_callback push_damage = [=] (wf::region_t region)
+    scene::damage_callback push_damage = [=] (wf::regionf_t region)
     {
         buffer_damage |= region;
     };
@@ -139,16 +139,17 @@ class copy_capture_instance
             return;
         }
 
-        frame_damage = buffer_damage + -wf::point_t{bbox.x, bbox.y};
+        frame_damage = buffer_damage + -wf::pointf_t{bbox.x, bbox.y};
         auto extents = frame_damage.get_extents();
-        frame_damage &= wf::region_t{wf::geometry_t{0, 0, std::max(0, extents.x2 - extents.x1), std::max(0,
-            extents.y2 -
-            extents.y1)}};
+        frame_damage &=
+            wf::regionf_t{wf::geometry_t{0, 0, std::max(0.0f, float(extents.x2 - extents.x1)), std::max(
+            0.0f,
+            float(extents.y2 - extents.y1))}};
         buffer_damage.clear();
 
         /* Dimension Limits */
-        bbox.width  = std::max(int(min_width), std::min(bbox.width, int(max_width)));
-        bbox.height = std::max(int(min_height), std::min(bbox.height, int(max_height)));
+        bbox.width  = std::max(double(min_width), std::min(bbox.width, double(max_width)));
+        bbox.height = std::max(double(min_height), std::min(bbox.height, double(max_height)));
 
         if ((toplevel_source.width != uint32_t(bbox.width)) ||
             (toplevel_source.height != uint32_t(bbox.height)))
@@ -161,7 +162,7 @@ class copy_capture_instance
                 wl_signal_emit_mutable(&swapchain->slots[0].buffer->events.release, NULL);
             }
 
-            dst.allocate({bbox.width, bbox.height});
+            dst.allocate({int(bbox.width), int(bbox.height)});
             swapchain->slots[0].buffer = dst.get_buffer();
             swapchain->width  = bbox.width;
             swapchain->height = bbox.height;
@@ -242,15 +243,16 @@ class copy_capture_instance
                     continue;
                 }
 
-                wf::geometry_t geometry{int((cursor->x - cursor->hotspot_x) / output->handle->scale - bbox.x),
-                    int((cursor->y - cursor->hotspot_y) / output->handle->scale - bbox.y),
-                    int(cursor->width / output->handle->scale), int(cursor->height / output->handle->scale)};
+                wf::geometry_t geometry{(cursor->x - cursor->hotspot_x) / output->handle->scale - bbox.x,
+                    (cursor->y - cursor->hotspot_y) / output->handle->scale - bbox.y,
+                    cursor->width / output->handle->scale, cursor->height / output->handle->scale};
 
                 wlr_render_texture_options opts{};
                 opts.texture   = cursor->texture;
                 opts.transform = output->handle->transform;
                 opts.src_box   = cursor->src_box;
-                opts.dst_box   = geometry;
+                opts.dst_box   = wf::to_integer_box(geometry);
+                opts.clip = wf::region_t{geometry}.to_pixman();
                 wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
             }
         }
@@ -275,8 +277,8 @@ class copy_capture_instance
         wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
 
         /* Dimension Limits */
-        bbox.width  = std::max(int(min_width), std::min(bbox.width, int(max_width)));
-        bbox.height = std::max(int(min_height), std::min(bbox.height, int(max_height)));
+        bbox.width  = std::max(double(min_width), std::min(bbox.width, double(max_width)));
+        bbox.height = std::max(double(min_height), std::min(bbox.height, double(max_height)));
 
         toplevel_source.width  = bbox.width;
         toplevel_source.height = bbox.height;
@@ -287,7 +289,7 @@ class copy_capture_instance
         };
         swapchain = wlr_swapchain_create(wf::get_core().allocator, bbox.width, bbox.height, &format);
         wlr_swapchain_slot slot{};
-        dst.allocate({bbox.width, bbox.height});
+        dst.allocate({int(bbox.width), int(bbox.height)});
         slot.buffer = dst.get_buffer();
         swapchain->slots[0] = slot;
         wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&toplevel_source, swapchain,
@@ -400,8 +402,8 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
     plugin->sessions[source]->last_time     = wf::get_current_time();
     plugin->sessions[source]->frame_fail    = false;
     plugin->sessions[source]->frame_damage |= wf::geometry_t{0, 0,
-        int(plugin->sessions[source]->toplevel_source.width),
-        int(plugin->sessions[source]->toplevel_source.height)};
+        double(plugin->sessions[source]->toplevel_source.width),
+        double(plugin->sessions[source]->toplevel_source.height)};
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
@@ -462,8 +464,8 @@ static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     }
 
     wf::region_t damage = wf::region_t{wf::geometry_t{0, 0,
-            int(plugin->sessions[source]->toplevel_source.width),
-            int(plugin->sessions[source]->toplevel_source.height)}};
+            double(plugin->sessions[source]->toplevel_source.width),
+            double(plugin->sessions[source]->toplevel_source.height)}};
     wlr_ext_image_capture_source_v1_frame_event frame_event
     {
         .damage = damage.to_pixman(),
