@@ -59,7 +59,6 @@ class copy_capture_instance
     wf::option_wrapper_t<bool> enable_cursor_capture{"copy-capture/enable_cursor_capture"};
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
     wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
-    wf::regionf_t buffer_damage;
     wlr_swapchain *swapchain;
 
   public:
@@ -70,7 +69,6 @@ class copy_capture_instance
     bool render_cursors = false;
     bool event_looping  = false;
     wf::auxilliary_buffer_t dst;
-    wf::regionf_t frame_damage;
     bool frame_fail = false;
     int64_t last_time;
 
@@ -83,9 +81,7 @@ class copy_capture_instance
     }
 
     scene::damage_callback push_damage = [=] (wf::regionf_t region)
-    {
-        buffer_damage |= region;
-    };
+    {};
 
     void destroy_render_instance_manager()
     {
@@ -138,14 +134,6 @@ class copy_capture_instance
         {
             return;
         }
-
-        frame_damage = buffer_damage + -wf::pointf_t{bbox.x, bbox.y};
-        auto extents = frame_damage.get_extents();
-        frame_damage &=
-            wf::regionf_t{wf::geometry_t{0, 0, std::max(0.0f, float(extents.x2 - extents.x1)), std::max(
-            0.0f,
-            float(extents.y2 - extents.y1))}};
-        buffer_damage.clear();
 
         /* Dimension Limits */
         bbox.width  = std::max(double(min_width), std::min(bbox.width, double(max_width)));
@@ -399,11 +387,8 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
     plugin->sessions[source]->render_cursors = with_cursors;
     plugin->sessions[source]->destroy_render_instance_manager();
     plugin->sessions[source]->create_render_instance_manager();
-    plugin->sessions[source]->last_time     = wf::get_current_time();
-    plugin->sessions[source]->frame_fail    = false;
-    plugin->sessions[source]->frame_damage |= wf::geometry_t{0, 0,
-        double(plugin->sessions[source]->toplevel_source.width),
-        double(plugin->sessions[source]->toplevel_source.height)};
+    plugin->sessions[source]->last_time  = wf::get_current_time();
+    plugin->sessions[source]->frame_fail = false;
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
@@ -492,14 +477,6 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
         plugin->sessions[source]->frame_fail = true;
         return;
     }
-
-    for (auto rect : plugin->sessions[source]->frame_damage)
-    {
-        ext_image_copy_capture_frame_v1_send_damage(frame->resource,
-            rect.x1, rect.y1, rect.x2 - rect.x1, rect.y2 - rect.y1);
-    }
-
-    plugin->sessions[source]->frame_damage.clear();
 
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
