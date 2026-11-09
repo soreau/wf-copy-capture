@@ -23,6 +23,8 @@
  */
 
 #include <map>
+#include <algorithm>
+#include <time.h>
 #include <wayfire/plugin.hpp>
 #include <wayfire/scene-render.hpp>
 #include <wayfire/output-layout.hpp>
@@ -57,20 +59,21 @@ class copy_capture_instance
     wf::option_wrapper_t<int> min_height{"copy-capture/min_height"};
     wf::option_wrapper_t<int> max_height{"copy-capture/max_height"};
     wf::option_wrapper_t<bool> enable_cursor_capture{"copy-capture/enable_cursor_capture"};
+
     std::unique_ptr<wf::scene::render_instance_manager_t> instance_manager = nullptr;
-    wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle;
-    wlr_swapchain *swapchain;
+    wlr_ext_foreign_toplevel_handle_v1 *toplevel_handle = nullptr;
+    wlr_swapchain *swapchain = nullptr;
 
   public:
     wf::option_wrapper_t<double> max_fps{"copy-capture/max_fps"};
-    wlr_ext_image_capture_source_v1 toplevel_source;
+    wlr_ext_image_capture_source_v1 toplevel_source{};
     wayfire_view selected_view    = nullptr;
     wl_resource *session_resource = nullptr;
     bool render_cursors = false;
     bool event_looping  = false;
     wf::auxilliary_buffer_t dst;
-    bool frame_fail = false;
-    int64_t last_time;
+    bool frame_fail   = false;
+    int64_t last_time = 0;
 
     copy_capture_instance()
     {}
@@ -128,7 +131,7 @@ class copy_capture_instance
         }
 
         auto root_node = view->get_surface_root_node();
-        auto bbox   = view->get_root_node()->get_children_bounding_box();
+        wf::geometry_t bbox = view->get_surface_root_node()->get_bounding_box();
         auto output = view->get_output();
         if (!output)
         {
@@ -144,18 +147,27 @@ class copy_capture_instance
         {
             toplevel_source.width  = bbox.width;
             toplevel_source.height = bbox.height;
-            ext_image_copy_capture_session_v1_send_buffer_size(session_resource, bbox.width, bbox.height);
-            if (swapchain->slots[0].acquired)
+
+            if (session_resource)
+            {
+                ext_image_copy_capture_session_v1_send_buffer_size(session_resource, bbox.width, bbox.height);
+            }
+
+            if (swapchain && swapchain->slots[0].acquired && swapchain->slots[0].buffer)
             {
                 wl_signal_emit_mutable(&swapchain->slots[0].buffer->events.release, NULL);
             }
 
             dst.allocate({int(bbox.width), int(bbox.height)});
-            swapchain->slots[0].buffer = dst.get_buffer();
-            swapchain->width  = bbox.width;
-            swapchain->height = bbox.height;
-            wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&toplevel_source, swapchain,
-                wf::get_core().renderer);
+
+            if (swapchain)
+            {
+                swapchain->slots[0].buffer = dst.get_buffer();
+                swapchain->width  = bbox.width;
+                swapchain->height = bbox.height;
+                wlr_ext_image_capture_source_v1_set_constraints_from_swapchain(&toplevel_source, swapchain,
+                    wf::get_core().renderer);
+            }
         }
 
         wf::render_target_t target = wf::render_target_t(dst.get_renderbuffer());
@@ -240,7 +252,8 @@ class copy_capture_instance
                 opts.transform = output->handle->transform;
                 opts.src_box   = cursor->src_box;
                 opts.dst_box   = wf::to_integer_box(geometry);
-                opts.clip = wf::region_t{geometry}.to_pixman();
+                wf::region_t clip_region{geometry};
+                opts.clip = clip_region.to_pixman();
                 wlr_render_pass_add_texture(pass.get_wlr_pass(), &opts);
             }
         }
@@ -276,6 +289,12 @@ class copy_capture_instance
             .len    = 0,
         };
         swapchain = wlr_swapchain_create(wf::get_core().allocator, bbox.width, bbox.height, &format);
+        if (!swapchain)
+        {
+            LOGE("Failed to create swapchain for copy capture request.");
+            return nullptr;
+        }
+
         wlr_swapchain_slot slot{};
         dst.allocate({int(bbox.width), int(bbox.height)});
         slot.buffer = dst.get_buffer();
@@ -295,13 +314,21 @@ class copy_capture_instance
         }
 
         destroy_render_instance_manager();
-        swapchain->slots[0].buffer = NULL;
-        wlr_swapchain_destroy(swapchain);
+
+        if (swapchain)
+        {
+            swapchain->slots[0].buffer = nullptr;
+            wlr_swapchain_destroy(swapchain);
+            swapchain = nullptr;
+        }
+
         dst.free();
         toplevel_handle  = nullptr;
         selected_view    = nullptr;
         session_resource = nullptr;
         render_cursors   = false;
+        event_looping    = false;
+        last_time = 0;
     }
 };
 
@@ -324,6 +351,10 @@ class copy_capture_plugin : public wf::plugin_interface_t
         {
             auto instance = std::make_unique<copy_capture_instance>();
             auto source   = instance->handle_new_request(data);
+            if (!source)
+            {
+                return;
+            }
 
             sessions[source] = std::move(instance);
         });
@@ -360,12 +391,12 @@ class copy_capture_plugin : public wf::plugin_interface_t
         for (auto & [source, instance] : sessions)
         {
             instance.reset();
-            sessions.erase(source);
         }
+
+        sessions.clear();
 
         on_new_request.disconnect();
         on_new_session.disconnect();
-        sessions.clear();
 
         plugin_ptr = nullptr;
     }
@@ -384,11 +415,17 @@ static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool wi
         return;
     }
 
-    plugin->sessions[source]->render_cursors = with_cursors;
-    plugin->sessions[source]->destroy_render_instance_manager();
-    plugin->sessions[source]->create_render_instance_manager();
-    plugin->sessions[source]->last_time  = wf::get_current_time();
-    plugin->sessions[source]->frame_fail = false;
+    auto it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
+    {
+        return;
+    }
+
+    it->second->render_cursors = with_cursors;
+    it->second->destroy_render_instance_manager();
+    it->second->create_render_instance_manager();
+    it->second->last_time  = wf::get_current_time();
+    it->second->frame_fail = false;
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
@@ -400,62 +437,99 @@ static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
         return;
     }
 
-    plugin->sessions[source].reset();
-    plugin->sessions.erase(source);
+    auto it = plugin->sessions.find(source);
+    if (it != plugin->sessions.end())
+    {
+        it->second.reset();
+        plugin->sessions.erase(it);
+    }
 }
 
 static void source_request_frame(struct wlr_ext_image_capture_source_v1 *source,
     bool schedule_frame)
 {
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
-    if (!plugin || !plugin->sessions[source])
+    if (!plugin)
     {
         return;
     }
 
-    if (plugin->sessions[source]->event_looping)
+    /** Use .find(). [] silently add to the array. */
+    auto it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
     {
         return;
     }
 
-    plugin->sessions[source]->event_looping = true;
-    auto last_time  = plugin->sessions[source]->last_time;
+    if (it->second->event_looping)
+    {
+        return;
+    }
+
+    it->second->event_looping = true;
+
+    /*
+     * Throttle the capture rate.
+     *
+     * NOTE: The previous implementation called wl_event_loop_dispatch()
+     * here to block until the next frame was due. That function is not
+     * re-entrant — we are already inside an event dispatch, and recursing
+     * corrupts libwayland's internal event-array state, causing a SIGSEGV
+     * as soon as a queued event (e.g. cursor motion) is dispatched by the
+     * inner loop. Block with nanosleep() instead; the outer event loop will
+     * resume normally once we return.
+     */
+    auto last_time  = it->second->last_time;
     int64_t elapsed = wf::get_current_time() - last_time;
-    auto ms = 1000 / plugin->sessions[source]->max_fps;
-    while (elapsed < ms)
-    {
-        if (!plugin->sessions[source])
-        {
-            return;
-        }
+    int fps    = std::max(1, (int)it->second->max_fps);
+    int64_t ms = 1000 / fps;
 
-        wl_event_loop_dispatch(wf::get_core().ev_loop, ms);
-        wl_display_flush_clients(wf::get_core().display);
-        elapsed = wf::get_current_time() - last_time;
+    if (elapsed < ms)
+    {
+        struct timespec ts
+        {
+            .tv_sec = 0, .tv_nsec = (ms - elapsed) * 1000000L
+        };
+        while (nanosleep(&ts, &ts) == -1 && errno == EINTR)
+        {
+            /* interrupted by signal, resume */
+        }
     }
 
-    if ((plugin->sessions.find(source) == plugin->sessions.end()) ||
-        !plugin->sessions[source]->session_resource)
+    /* Re-lookup: session may have gone away while we slept. */
+    it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
     {
         return;
     }
 
-    plugin->sessions[source]->event_looping = false;
-    plugin->sessions[source]->last_time     = wf::get_current_time();
+    it->second->last_time = wf::get_current_time();
 
-    if (!plugin->sessions[source]->frame_fail)
+    if (!it->second->frame_fail)
     {
-        plugin->sessions[source]->view_snapshot();
+        it->second->view_snapshot();
+    }
+
+    it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
+    {
+        return;
     }
 
     wf::region_t damage = wf::region_t{wf::geometry_t{0, 0,
-            double(plugin->sessions[source]->toplevel_source.width),
-            double(plugin->sessions[source]->toplevel_source.height)}};
+            double(it->second->toplevel_source.width),
+            double(it->second->toplevel_source.height)}};
     wlr_ext_image_capture_source_v1_frame_event frame_event
     {
         .damage = damage.to_pixman(),
     };
-    wl_signal_emit_mutable(&plugin->sessions[source]->toplevel_source.events.frame, &frame_event);
+    wl_signal_emit_mutable(&it->second->toplevel_source.events.frame, &frame_event);
+
+    auto it2 = plugin->sessions.find(source);
+    if ((it2 != plugin->sessions.end()) && it2->second)
+    {
+        it2->second->event_looping = false;
+    }
 }
 
 static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
@@ -468,20 +542,26 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
         return;
     }
 
-    auto buffer = plugin->sessions[source]->dst.get_buffer();
+    auto it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
+    {
+        return;
+    }
+
+    auto buffer = it->second->dst.get_buffer();
     if (!wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, buffer,
         wf::get_core().renderer))
     {
         LOGD("Failed to copy view buffer to client frame buffer!");
 
-        plugin->sessions[source]->frame_fail = true;
+        it->second->frame_fail = true;
         return;
     }
 
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &ts);
-    plugin->sessions[source]->frame_fail = false;
+    it->second->frame_fail = false;
 }
 
 static const struct wlr_ext_image_capture_source_v1_interface source_impl = {
