@@ -16,7 +16,6 @@ add_project_arguments(['-DWAYFIRE_PLUGIN'], language: ['cpp', 'c'])
 add_project_link_arguments(['-rdynamic','-fPIC'], language:'cpp')
 
 wayfire = dependency('wayfire', version: '>=0.11.0')
-wayland_client = dependency('wayland-client')
 wayland_protos = dependency('wayland-protocols')
 
 subdir('proto')

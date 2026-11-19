@@ -27,7 +27,7 @@ foreach p : server_protocols
 	wl_protos_src += wayland_scanner_code.process(xml)
 endforeach
 
-lib_wl_protos = static_library('wl_protos', wl_protos_src + wl_protos_headers)
+lib_wl_protos = static_library('wl_protos', wl_protos_src + wl_protos_headers, dependencies: wayfire)
 
 wf_protos = declare_dependency(
 	link_with: lib_wl_protos,
