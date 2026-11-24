@@ -114,6 +114,16 @@ class copy_capture_instance
         instance_manager->set_visibility_region(view->get_surface_root_node()->get_bounding_box());
     }
 
+    wf::geometry_t get_capture_geometry(wayfire_view view)
+    {
+        if (auto toplevel = wf::toplevel_cast(view))
+        {
+            return toplevel->get_geometry();
+        }
+
+        return view->get_root_node()->get_children_bounding_box();
+    }
+
     void view_snapshot()
     {
         wayfire_view view = selected_view;
@@ -128,8 +138,9 @@ class copy_capture_instance
         }
 
         auto root_node = view->get_surface_root_node();
-        auto bbox   = view->get_root_node()->get_children_bounding_box();
+        auto bbox   = get_capture_geometry(view);
         auto output = view->get_output();
+
         if (!output)
         {
             return;
@@ -262,7 +273,7 @@ class copy_capture_instance
 
         ext_image_capture_source_v1_init(&toplevel_source);
 
-        wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
+        auto bbox = get_capture_geometry(selected_view);
 
         /* Dimension Limits */
         bbox.width  = std::max(double(min_width), std::min(bbox.width, double(max_width)));
