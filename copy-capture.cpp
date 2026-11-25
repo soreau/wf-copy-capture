@@ -31,6 +31,7 @@
 #include <wayfire/scene-operations.hpp>
 #include <wayfire/signal-definitions.hpp>
 #include <wayfire/nonstd/wlroots-full.hpp>
+#include <string>
 
 extern "C"
 {
@@ -64,7 +65,8 @@ class copy_capture_instance
   public:
     wf::option_wrapper_t<double> max_fps{"copy-capture/max_fps"};
     wlr_ext_image_capture_source_v1 toplevel_source;
-    wayfire_view selected_view    = nullptr;
+    wayfire_view selected_view = nullptr;
+    std::string app_id;
     wl_resource *session_resource = nullptr;
     bool render_cursors = false;
     bool event_looping  = false;
@@ -260,6 +262,8 @@ class copy_capture_instance
             return nullptr;
         }
 
+        app_id = selected_view->get_app_id();
+
         ext_image_capture_source_v1_init(&toplevel_source);
 
         wf::geometry_t bbox = selected_view->get_surface_root_node()->get_bounding_box();
@@ -377,30 +381,48 @@ wf::copy_capture::copy_capture_plugin *plugin;
 
 static void source_start(struct wlr_ext_image_capture_source_v1 *source, bool with_cursors)
 {
-    LOGD(__func__, ": Client started toplevel copy capture.");
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
     if (!plugin)
     {
         return;
     }
 
-    plugin->sessions[source]->render_cursors = with_cursors;
-    plugin->sessions[source]->destroy_render_instance_manager();
-    plugin->sessions[source]->create_render_instance_manager();
-    plugin->sessions[source]->last_time  = wf::get_current_time();
-    plugin->sessions[source]->frame_fail = false;
+    auto it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
+    {
+        return;
+    }
+
+    auto& session = it->second;
+
+    LOGD(__func__, ": Client started toplevel copy capture.",
+        session->app_id.empty() ? "" : " [app-id: " + session->app_id + "]");
+
+    session->render_cursors = with_cursors;
+    session->destroy_render_instance_manager();
+    session->create_render_instance_manager();
+    session->last_time  = wf::get_current_time();
+    session->frame_fail = false;
 }
 
 static void source_stop(struct wlr_ext_image_capture_source_v1 *source)
 {
-    LOGD(__func__, ": Client stopped toplevel copy capture.");
     plugin = (wf::copy_capture::copy_capture_plugin*)plugin_ptr;
     if (!plugin)
     {
         return;
     }
 
-    plugin->sessions[source].reset();
+    auto it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
+    {
+        return;
+    }
+
+    LOGD(__func__, ": Client stopped toplevel copy capture.",
+        it->second->app_id.empty() ? "" : " [app-id: " + it->second->app_id + "]");
+
+    it->second.reset();
     plugin->sessions.erase(source);
 }
 
@@ -468,11 +490,18 @@ static void source_copy_frame(struct wlr_ext_image_capture_source_v1 *source,
         return;
     }
 
+    auto it = plugin->sessions.find(source);
+    if ((it == plugin->sessions.end()) || !it->second)
+    {
+        return;
+    }
+
     auto buffer = plugin->sessions[source]->dst.get_buffer();
     if (!wlr_ext_image_copy_capture_frame_v1_copy_buffer(frame, buffer,
         wf::get_core().renderer))
     {
-        LOGD("Failed to copy view buffer to client frame buffer!");
+        LOGD("Failed to copy view buffer to client frame buffer!",
+            it->second->app_id.empty() ? "" : " [app-id: " + it->second->app_id + "]");
 
         plugin->sessions[source]->frame_fail = true;
         return;
